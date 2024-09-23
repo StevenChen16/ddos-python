@@ -148,10 +148,14 @@ def check_proxy(proxy, proxy_type):
 # 验证并过滤有效代理
 def validate_proxies(proxies, proxy_type):
     valid_proxies = []
-    for proxy in proxies:
-        proxy = proxy.split(":")
-        if check_proxy(proxy, proxy_type):
-            valid_proxies.append(proxy)
+    print("正在验证代理...")
+    with tqdm(total=len(proxies)) as pbar:  # 显示代理验证进度
+        for proxy in proxies:
+            proxy = proxy.split(":")
+            if check_proxy(proxy, proxy_type):
+                valid_proxies.append(proxy)
+            pbar.update(1)
+    print(f"验证完成：{len(valid_proxies)} 个代理可用")
     return valid_proxies
 
 # 执行请求，通过代理发送
