@@ -115,7 +115,7 @@ def net_speed():
 def update_progress(start_time, test_duration):
     global active_threads, requests_last_second, bytes_sent
     # with tqdm(total=test_duration, bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{rate_fmt}]') as pbar:
-    with tqdm(total=test_duration, desc='Progress') as pbar:
+    with tqdm(total=test_duration, desc='Progress', ncols=80) as pbar:
         while threads_running:
             elapsed_time = time.time() - start_time
             progress = elapsed_time / test_duration
