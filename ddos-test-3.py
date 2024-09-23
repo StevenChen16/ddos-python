@@ -328,7 +328,7 @@ Version 3.7.1 (2024/9/22)
 │                 New stuff:                  │
 │          [+] Added Java Version             │
 ├─────────────────────────────────────────────┤
-│ Link: https://github.com/StevenChen16/PyDDoS│
+│ https://github.com/StevenChen16/ddos-python │
 └─────────────────────────────────────────────┘
     ''')
 
