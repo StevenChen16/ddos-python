@@ -15,6 +15,7 @@ import sublist3r
 import string
 import signal
 import sys
+import os
 
 # 初始化日志记录
 logging.basicConfig(filename='request_logs.log', level=logging.INFO,
@@ -69,7 +70,7 @@ def dynamic_thread_management():
 
 # 记录请求的详细信息
 def log_request_details(result):
-    logging.info(f"URL: {result['url']}, Status: {result['status_code']}, "
+    logging.info(f"URL: {result['url']}, Method: {result['method']}, Status: {result['status_code']}, "
                  f"Response Time: {result['response_time']:.2f}s, Data Size: {result['data_size']} bytes")
 
 # 显示当前网络流量
@@ -120,8 +121,26 @@ def check_domain_accessibility(domain, max_retries):
         time.sleep(1)
     return success
 
+# 加载大文件到内存中
+def load_files_to_memory(file_or_folder):
+    files_in_memory = []
+    if os.path.isdir(file_or_folder):
+        for root, dirs, files in os.walk(file_or_folder):
+            for file in files:
+                path = os.path.join(root, file)
+                with open(path, 'rb') as f:
+                    files_in_memory.append(f.read())
+    else:
+        with open(file_or_folder, 'rb') as f:
+            files_in_memory.append(f.read())
+    return files_in_memory
+
+# 随机选择 HTTP 请求方法
+def select_http_method(methods):
+    return random.choice(methods)
+
 # 执行请求
-def perform_requests(urls, headers_list, request_interval):
+def perform_requests(urls, headers_list, request_interval, methods, garbled_text_len, files_in_memory):
     global active_threads, requests_last_second
     with lock:
         active_threads += 1
@@ -131,27 +150,47 @@ def perform_requests(urls, headers_list, request_interval):
             headers = random.choice(headers_list)
             start_time = datetime.now()
             
-            # 生成乱码数据并发送请求
-            garbled_text = generate_garbled_text(160)
-            response = requests.post(url, headers=headers, data=garbled_text, verify=False)
+            # 选择请求方法
+            method = select_http_method(methods)
+            
+            # 数据内容：乱码或者文件
+            data = None
+            if garbled_text_len:
+                data = generate_garbled_text(garbled_text_len)
+            elif files_in_memory:
+                data = random.choice(files_in_memory)
+            
+            # 发送请求
+            response = None
+            try:
+                if method == 'GET':
+                    response = requests.get(url, headers=headers, verify=False)
+                elif method == 'POST':
+                    response = requests.post(url, headers=headers, data=data, verify=False)
+                elif method == 'DELETE':
+                    response = requests.delete(url, headers=headers, data=data, verify=False)
+            except requests.exceptions.RequestException as e:
+                logging.error(f"请求错误: {e}")
+                continue
 
             # 请求完成，记录时间和数据大小
-            end_time = datetime.now()
-            elapsed_time = (end_time - start_time).total_seconds()
-            data_size = len(response.content)
-                
-            with lock:
-                result = {
-                    "timestamp": start_time,
-                    "url": url,
-                    "response_time": elapsed_time,
-                    "status_code": response.status_code,
-                    "success": response.status_code == 200,
-                    "data_size": data_size
-                }
-                results.append(result)
-                requests_last_second += 1
-                log_request_details(result)
+            if response:
+                end_time = datetime.now()
+                elapsed_time = (end_time - start_time).total_seconds()
+                data_size = len(response.content)
+                    
+                with lock:
+                    result = {
+                        "timestamp": start_time,
+                        "url": url,
+                        "method": method,
+                        "response_time": elapsed_time,
+                        "status_code": response.status_code,
+                        "data_size": data_size
+                    }
+                    results.append(result)
+                    requests_last_second += 1
+                    log_request_details(result)
 
             time.sleep(request_interval)
     finally:
@@ -204,6 +243,9 @@ def main():
     parser.add_argument('--ua-file', type=str, default='user_agents.txt', help='Path to User-Agent list file.')
     parser.add_argument('--tolerance', type=int, default=5, help='Maximum retries for domain check.')
     parser.add_argument('--skip-check', action='store_true', help='Skip domain accessibility check.')
+    parser.add_argument('--methods', nargs='+', default=['GET'], help='HTTP methods to use (GET, POST, DELETE).')
+    parser.add_argument('--garbled-text-len', type=int, help='Length of random garbled text to send in requests.')
+    parser.add_argument('--file', type=str, help='Path to a file or folder for sending large files.')
 
     args = parser.parse_args()
 
@@ -211,15 +253,10 @@ def main():
     global thread_count, test_duration, request_interval, lock
 
     # 检查域名是否可访问（若未跳过）
-    domain_accessible = False
     if not args.skip_check:
         domain_accessible = check_domain_accessibility(args.domain, args.tolerance)
-        if domain_accessible:
-            print(f"域名 {args.domain} 检查成功，可以访问。")
-        else:
-            print(f"域名 {args.domain} 检查失败，无法访问。")
-    else:
-        print(f"跳过域名检查。")
+        if not domain_accessible:
+            print(f"Warning: 域名 {args.domain} 访问失败，将继续进行压力测试。")
 
     # 加载 User-Agent 列表
     headers_list = [{"User-Agent": ua} for ua in load_user_agents(args.ua_file)]
@@ -230,6 +267,12 @@ def main():
 
     print(f"Valid URLs found: {len(all_urls)}")
     urls = list(all_urls)
+
+    # 读取大文件到内存中
+    files_in_memory = []
+    if args.file:
+        files_in_memory = load_files_to_memory(args.file)
+        print(f"Loaded {len(files_in_memory)} files into memory.")
 
     # 共享资源初始化
     threads_running = True
@@ -247,7 +290,7 @@ def main():
     # 启动压力测试线程
     threads = []
     for _ in range(args.threads):
-        t = threading.Thread(target=perform_requests, args=(urls, headers_list, args.interval))
+        t = threading.Thread(target=perform_requests, args=(urls, headers_list, args.interval, args.methods, args.garbled_text_len, files_in_memory))
         t.start()
         threads.append(t)
 
