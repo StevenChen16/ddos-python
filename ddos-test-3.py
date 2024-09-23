@@ -129,18 +129,79 @@ def check_domain_accessibility(domain, max_retries):
     return success
 
 # 处理大文件上传
-def handle_large_files(file_count, file_size, regenerate_files, memory_files):
+def handle_large_files(file_count, file_size, regenerate_files):
     files_in_memory = []
+
+    # 创建临时文件夹用于存储大文件
+    temp_folder = "temp_files"
+    if not os.path.exists(temp_folder):
+        os.makedirs(temp_folder)
+
     if regenerate_files:
-        for _ in range(file_count):
-            file_name = f"temp_file_{random.randint(1, 10000)}.bin"
-            generate_large_binary_file(file_name, file_size)
-            files_in_memory.append(file_name)  # 存储文件名而非文件内容
-    else:
+        # 每次都重新生成，文件不会被保存到文件夹
         for _ in range(file_count):
             file_data = os.urandom(file_size * 1024 * 1024)
-            files_in_memory.append(file_data)  # 存储文件内容
+            files_in_memory.append(file_data)
+    else:
+        # 如果选择只生成有限个文件，则存储在 temp_files 文件夹中
+        for i in range(file_count):
+            file_path = os.path.join(temp_folder, f"large_file_{i}.bin")
+            if not os.path.exists(file_path):
+                generate_large_binary_file(file_path, file_size)
+            with open(file_path, 'rb') as f:
+                files_in_memory.append(f.read())  # 将文件内容加载到内存
     return files_in_memory
+
+# 代理检查函数
+def check_proxy(proxy, proxy_type, timeout=3):
+    try:
+        s = socks.socksocket()
+        s.settimeout(timeout)
+        if proxy_type == 'SOCKS4':
+            s.set_proxy(socks.SOCKS4, proxy[0], int(proxy[1]))
+        elif proxy_type == 'SOCKS5':
+            s.set_proxy(socks.SOCKS5, proxy[0], int(proxy[1]))
+        elif proxy_type == 'HTTP':
+            s.set_proxy(socks.HTTP, proxy[0], int(proxy[1]))
+        s.connect(('1.1.1.1', 80))  # 测试代理的可用性
+        return True
+    except Exception:
+        return False
+
+# 验证代理的线程处理
+def validate_proxies_threaded(proxies, proxy_type, max_threads=10):
+    valid_proxies = []
+    lock = threading.Lock()
+
+    def validate_proxy(proxy):
+        nonlocal valid_proxies
+        proxy = proxy.split(":")
+        if check_proxy(proxy, proxy_type):
+            with lock:
+                valid_proxies.append(proxy)
+
+    print("正在并行验证代理...")
+    with tqdm(total=len(proxies)) as pbar:
+        def thread_worker():
+            while proxies_queue:
+                proxy = proxies_queue.pop(0)
+                validate_proxy(proxy)
+                pbar.update(1)
+
+        # 创建工作队列
+        proxies_queue = proxies.copy()
+        threads = []
+
+        for _ in range(min(max_threads, len(proxies_queue))):
+            t = threading.Thread(target=thread_worker)
+            threads.append(t)
+            t.start()
+
+        for t in threads:
+            t.join()
+
+    print(f"验证完成：{len(valid_proxies)} 个代理可用")
+    return valid_proxies
 
 # 执行请求，检查冲突，并通过代理发送
 def perform_requests(urls, headers_list, request_interval, methods, garbled_text_len, files_in_memory, proxies, proxy_type):
@@ -168,10 +229,22 @@ def perform_requests(urls, headers_list, request_interval, methods, garbled_text
             elif files_in_memory:
                 data = random.choice(files_in_memory)  # 随机选择一个文件或内容
             
+            # 设置代理
+            proxy = random.choice(proxies) if proxies else None
+            if proxy:
+                s = socks.socksocket()
+                if proxy_type == 'SOCKS4':
+                    s.set_proxy(socks.SOCKS4, proxy[0], int(proxy[1]))
+                elif proxy_type == 'SOCKS5':
+                    s.set_proxy(socks.SOCKS5, proxy[0], int(proxy[1]))
+                elif proxy_type == 'HTTP':
+                    s.set_proxy(socks.HTTP, proxy[0], int(proxy[1]))
+                s.connect((url, 80))
+
             # 发送请求
             try:
                 if method == 'GET':
-                    response = requests.get(url, headers=headers, verify=False)
+                    response = requests.get(url, headers=headers, proxies=proxy, verify=False)
                 elif method == 'POST':
                     if files_in_memory:
                         response = requests.post(url, headers=headers, files={'file': data}, verify=False)
@@ -225,6 +298,7 @@ def main():
     parser.add_argument('--regenerate-files', action='store_true', help='Regenerate files instead of caching them.')
     parser.add_argument('--proxy-file', type=str, help='Path to proxy list file.')
     parser.add_argument('--proxy-type', type=str, default='SOCKS5', choices=['SOCKS4', 'SOCKS5', 'HTTP'], help='Type of proxies to use.')
+    parser.add_argument('--proxy-threads', type=int, default=10, help='Number of threads for validating proxies.')
 
     args = parser.parse_args()
 
@@ -250,8 +324,17 @@ def main():
     # 处理大文件
     files_in_memory = []
     if args.file_count:
-        files_in_memory = handle_large_files(args.file_count, args.file_size, args.regenerate_files, files_in_memory)
+        files_in_memory = handle_large_files(args.file_count, args.file_size, args.regenerate_files)
         print(f"Generated or loaded {len(files_in_memory)} files.")
+
+    # 加载代理列表并并行验证
+    proxies = []
+    if args.proxy_file:
+        with open(args.proxy_file, 'r') as f:
+            proxies = [line.strip() for line in f.readlines()]
+        print(f"Loaded {len(proxies)} proxies from file.")
+        proxies = validate_proxies_threaded(proxies, args.proxy_type, max_threads=args.proxy_threads)
+        print(f"{len(proxies)} proxies validated and usable.")
 
     # 共享资源初始化
     threads_running = True
@@ -270,7 +353,7 @@ def main():
     # 启动压力测试线程
     threads = []
     for _ in range(args.threads):
-        t = threading.Thread(target=perform_requests, args=(urls, headers_list, args.interval, args.methods, args.garbled_text_len, files_in_memory, None, args.proxy_type))
+        t = threading.Thread(target=perform_requests, args=(urls, headers_list, args.interval, args.methods, args.garbled_text_len, files_in_memory, proxies, args.proxy_type))
         t.start()
         threads.append(t)
 
