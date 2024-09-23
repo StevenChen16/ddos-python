@@ -1,5 +1,6 @@
 import argparse
 import requests
+import socks
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 import time
@@ -84,19 +85,20 @@ def net_speed():
     recv = (recv_now - recv_before) / 1024
     return sent, recv
 
-# 使用 tqdm 显示测试进度和 Dashboard 信息
+# 使用 tqdm 显示测试进度和 Dashboard 信息，添加了发送速率显示
 def update_progress(start_time, test_duration):
-    global active_threads, requests_last_second
+    global active_threads, requests_last_second, bytes_sent
     with tqdm(total=test_duration, bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{rate_fmt}]') as pbar:
         while threads_running:
             elapsed_time = time.time() - start_time
             progress = elapsed_time / test_duration
             pbar.n = int(progress * test_duration)
+            rate = bytes_sent / (elapsed_time * 1024 * 1024)  # 计算发送速率 (MB/s)
             pbar.set_postfix({
                 'Active Threads': active_threads,
                 'Requests/s': requests_last_second,
-                'Upload': f"{net_speed()[0]:.2f}KB/s",
-                'Download': f"{net_speed()[1]:.2f}KB/s"
+                'Upload': f"{rate:.2f}MB/s" if rate > 1 else f"{rate*1024:.2f}KB/s",
+                'Total Requests': len(results)
             })
             pbar.update(0)
             time.sleep(1)
@@ -121,27 +123,40 @@ def check_domain_accessibility(domain, max_retries):
         time.sleep(1)
     return success
 
-# 加载大文件到内存中
-def load_files_to_memory(file_or_folder):
-    files_in_memory = []
-    if os.path.isdir(file_or_folder):
-        for root, dirs, files in os.walk(file_or_folder):
-            for file in files:
-                path = os.path.join(root, file)
-                with open(path, 'rb') as f:
-                    files_in_memory.append(f.read())
-    else:
-        with open(file_or_folder, 'rb') as f:
-            files_in_memory.append(f.read())
-    return files_in_memory
+# 加载代理列表
+def load_proxies(proxy_file):
+    proxies = []
+    with open(proxy_file, 'r') as f:
+        proxies = [line.strip() for line in f.readlines()]
+    return proxies
 
-# 随机选择 HTTP 请求方法
-def select_http_method(methods):
-    return random.choice(methods)
+# 检查代理是否可用
+def check_proxy(proxy, proxy_type):
+    try:
+        s = socks.socksocket()
+        if proxy_type == 'SOCKS4':
+            s.set_proxy(socks.SOCKS4, proxy[0], int(proxy[1]))
+        elif proxy_type == 'SOCKS5':
+            s.set_proxy(socks.SOCKS5, proxy[0], int(proxy[1]))
+        elif proxy_type == 'HTTP':
+            s.set_proxy(socks.HTTP, proxy[0], int(proxy[1]))
+        s.connect(('1.1.1.1', 80))  # 测试代理的可用性
+        return True
+    except Exception:
+        return False
 
-# 执行请求
-def perform_requests(urls, headers_list, request_interval, methods, garbled_text_len, files_in_memory):
-    global active_threads, requests_last_second
+# 验证并过滤有效代理
+def validate_proxies(proxies, proxy_type):
+    valid_proxies = []
+    for proxy in proxies:
+        proxy = proxy.split(":")
+        if check_proxy(proxy, proxy_type):
+            valid_proxies.append(proxy)
+    return valid_proxies
+
+# 执行请求，通过代理发送
+def perform_requests(urls, headers_list, request_interval, methods, garbled_text_len, files_in_memory, proxies, proxy_type):
+    global active_threads, requests_last_second, bytes_sent
     with lock:
         active_threads += 1
     try:
@@ -151,7 +166,7 @@ def perform_requests(urls, headers_list, request_interval, methods, garbled_text
             start_time = datetime.now()
             
             # 选择请求方法
-            method = select_http_method(methods)
+            method = random.choice(methods)
             
             # 数据内容：乱码或者文件
             data = None
@@ -160,15 +175,26 @@ def perform_requests(urls, headers_list, request_interval, methods, garbled_text
             elif files_in_memory:
                 data = random.choice(files_in_memory)
             
+            # 设置代理
+            proxy = random.choice(proxies) if proxies else None
+            if proxy:
+                s = socks.socksocket()
+                if proxy_type == 'SOCKS4':
+                    s.set_proxy(socks.SOCKS4, proxy[0], int(proxy[1]))
+                elif proxy_type == 'SOCKS5':
+                    s.set_proxy(socks.SOCKS5, proxy[0], int(proxy[1]))
+                elif proxy_type == 'HTTP':
+                    s.set_proxy(socks.HTTP, proxy[0], int(proxy[1]))
+                s.connect((url, 80))
+
             # 发送请求
-            response = None
             try:
                 if method == 'GET':
-                    response = requests.get(url, headers=headers, verify=False)
+                    response = requests.get(url, headers=headers, proxies=proxy, verify=False)
                 elif method == 'POST':
-                    response = requests.post(url, headers=headers, data=data, verify=False)
+                    response = requests.post(url, headers=headers, data=data, proxies=proxy, verify=False)
                 elif method == 'DELETE':
-                    response = requests.delete(url, headers=headers, data=data, verify=False)
+                    response = requests.delete(url, headers=headers, data=data, proxies=proxy, verify=False)
             except requests.exceptions.RequestException as e:
                 logging.error(f"请求错误: {e}")
                 continue
@@ -190,48 +216,13 @@ def perform_requests(urls, headers_list, request_interval, methods, garbled_text
                     }
                     results.append(result)
                     requests_last_second += 1
+                    bytes_sent += data_size
                     log_request_details(result)
 
             time.sleep(request_interval)
     finally:
         with lock:
             active_threads -= 1
-
-# 结果分析并可视化
-def analyze_results(urls):
-    url_stats = {url: {"times_requested": 0, "response_times": [], "data_sizes": [], "failures": 0} for url in urls}
-    for result in results:
-        stats = url_stats[result["url"]]
-        stats["times_requested"] += 1
-        stats["response_times"].append(result["response_time"])
-        stats["data_sizes"].append(result["data_size"])
-        if not result["success"]:
-            stats["failures"] += 1
-
-    plt.figure(figsize=(len(urls), 8), dpi=800)
-
-    plt.subplot(1, 3, 1)
-    plt.bar(range(len(urls)), [stats['failures'] for stats in url_stats.values()], tick_label=list(url_stats.keys()))
-    plt.xticks(rotation=45, ha="right", fontsize=8)
-    plt.ylabel('Failures')
-    plt.title('Failures by URL')
-
-    plt.subplot(1, 3, 2)
-    plt.bar(range(len(urls)), [np.mean(stats['data_sizes']) for stats in url_stats.values()], tick_label=list(url_stats.keys()))
-    plt.xticks(rotation=45, ha="right", fontsize=8)
-    plt.ylabel('Average Data Size (bytes)')
-    plt.title('Average Data Size by URL')
-
-    plt.subplot(1, 3, 3)
-    plt.bar(range(len(urls)), [np.mean(stats['response_times']) for stats in url_stats.values()], tick_label=list(url_stats.keys()))
-    plt.xticks(rotation=45, ha="right", fontsize=8)
-    plt.ylabel('Average Response Time (s)')
-    plt.title('Average Response Time by URL')
-
-    now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    plt.savefig(f"{now}.jpg")
-    plt.tight_layout()
-    plt.show()
 
 # 主程序逻辑
 def main():
@@ -246,10 +237,12 @@ def main():
     parser.add_argument('--methods', nargs='+', default=['GET'], help='HTTP methods to use (GET, POST, DELETE).')
     parser.add_argument('--garbled-text-len', type=int, help='Length of random garbled text to send in requests.')
     parser.add_argument('--file', type=str, help='Path to a file or folder for sending large files.')
+    parser.add_argument('--proxy-file', type=str, help='Path to proxy list file.')
+    parser.add_argument('--proxy-type', type=str, default='SOCKS5', choices=['SOCKS4', 'SOCKS5', 'HTTP'], help='Type of proxies to use.')
 
     args = parser.parse_args()
 
-    global threads_running, active_threads, requests_last_second, results
+    global threads_running, active_threads, requests_last_second, results, bytes_sent
     global thread_count, test_duration, request_interval, lock
 
     # 检查域名是否可访问（若未跳过）
@@ -274,12 +267,21 @@ def main():
         files_in_memory = load_files_to_memory(args.file)
         print(f"Loaded {len(files_in_memory)} files into memory.")
 
+    # 加载代理列表并验证
+    proxies = []
+    if args.proxy_file:
+        proxies = load_proxies(args.proxy_file)
+        print(f"Loaded {len(proxies)} proxies from file.")
+        proxies = validate_proxies(proxies, args.proxy_type)
+        print(f"{len(proxies)} proxies validated and usable.")
+
     # 共享资源初始化
     threads_running = True
     lock = threading.Lock()
     results = []
     requests_last_second = 0
     active_threads = 0
+    bytes_sent = 0
 
     start_time = time.time()
 
@@ -290,7 +292,7 @@ def main():
     # 启动压力测试线程
     threads = []
     for _ in range(args.threads):
-        t = threading.Thread(target=perform_requests, args=(urls, headers_list, args.interval, args.methods, args.garbled_text_len, files_in_memory))
+        t = threading.Thread(target=perform_requests, args=(urls, headers_list, args.interval, args.methods, args.garbled_text_len, files_in_memory, proxies, args.proxy_type))
         t.start()
         threads.append(t)
 
