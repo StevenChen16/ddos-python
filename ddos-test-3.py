@@ -131,9 +131,10 @@ def load_proxies(proxy_file):
     return proxies
 
 # 检查代理是否可用
-def check_proxy(proxy, proxy_type):
+def check_proxy(proxy, proxy_type, timeout=3):
     try:
         s = socks.socksocket()
+        s.settimeout(timeout)
         if proxy_type == 'SOCKS4':
             s.set_proxy(socks.SOCKS4, proxy[0], int(proxy[1]))
         elif proxy_type == 'SOCKS5':
@@ -145,16 +146,38 @@ def check_proxy(proxy, proxy_type):
     except Exception:
         return False
 
-# 验证并过滤有效代理
-def validate_proxies(proxies, proxy_type):
+# 并行验证代理
+def validate_proxies_threaded(proxies, proxy_type, max_threads=10):
     valid_proxies = []
-    print("正在验证代理...")
-    with tqdm(total=len(proxies)) as pbar:  # 显示代理验证进度
-        for proxy in proxies:
-            proxy = proxy.split(":")
-            if check_proxy(proxy, proxy_type):
+    lock = threading.Lock()
+
+    def validate_proxy(proxy):
+        nonlocal valid_proxies
+        proxy = proxy.split(":")
+        if check_proxy(proxy, proxy_type):
+            with lock:
                 valid_proxies.append(proxy)
-            pbar.update(1)
+
+    print("正在并行验证代理...")
+    with tqdm(total=len(proxies)) as pbar:
+        def thread_worker():
+            while proxies_queue:
+                proxy = proxies_queue.pop(0)
+                validate_proxy(proxy)
+                pbar.update(1)
+
+        # 创建工作队列
+        proxies_queue = proxies.copy()
+        threads = []
+
+        for _ in range(min(max_threads, len(proxies_queue))):
+            t = threading.Thread(target=thread_worker)
+            threads.append(t)
+            t.start()
+
+        for t in threads:
+            t.join()
+
     print(f"验证完成：{len(valid_proxies)} 个代理可用")
     return valid_proxies
 
@@ -243,6 +266,7 @@ def main():
     parser.add_argument('--file', type=str, help='Path to a file or folder for sending large files.')
     parser.add_argument('--proxy-file', type=str, help='Path to proxy list file.')
     parser.add_argument('--proxy-type', type=str, default='SOCKS5', choices=['SOCKS4', 'SOCKS5', 'HTTP'], help='Type of proxies to use.')
+    parser.add_argument('--proxy-threads', type=int, default=10, help='Number of threads for validating proxies.')
 
     args = parser.parse_args()
 
@@ -271,12 +295,12 @@ def main():
         files_in_memory = load_files_to_memory(args.file)
         print(f"Loaded {len(files_in_memory)} files into memory.")
 
-    # 加载代理列表并验证
+    # 加载代理列表并并行验证
     proxies = []
     if args.proxy_file:
         proxies = load_proxies(args.proxy_file)
         print(f"Loaded {len(proxies)} proxies from file.")
-        proxies = validate_proxies(proxies, args.proxy_type)
+        proxies = validate_proxies_threaded(proxies, args.proxy_type, max_threads=args.proxy_threads)
         print(f"{len(proxies)} proxies validated and usable.")
 
     # 共享资源初始化
