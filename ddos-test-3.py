@@ -326,7 +326,7 @@ def main():
     parser.add_argument('--proxy-type', type=str, default='SOCKS5', choices=['SOCKS4', 'SOCKS5', 'HTTP'], help='Type of proxies to use.')
     parser.add_argument('--proxy-threads', type=int, default=30, help='Number of threads for validating proxies.')
     parser.add_argument('--max-depth', type=int, default=2, help='Maximum depth for crawling links.')
-    parser.add_argument('--recursive-link-search', type='store_true', help='Recursive link search')
+    parser.add_argument('--recursive-link-search', action='store_true', help='Recursive link search')
 
     args = parser.parse_args()
 
