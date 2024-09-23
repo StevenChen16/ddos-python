@@ -114,7 +114,8 @@ def net_speed():
 # 使用 tqdm 显示测试进度和 Dashboard 信息
 def update_progress(start_time, test_duration):
     global active_threads, requests_last_second, bytes_sent
-    with tqdm(total=test_duration, bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{rate_fmt}]') as pbar:
+    # with tqdm(total=test_duration, bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{rate_fmt}]') as pbar:
+    with tqdm(total=test_duration, desc='Progress') as pbar:
         while threads_running:
             elapsed_time = time.time() - start_time
             progress = elapsed_time / test_duration
@@ -201,7 +202,7 @@ def validate_proxies_threaded(proxies, proxy_type, max_threads=10):
             with lock:
                 valid_proxies.append(proxy)
 
-    print("正在并行验证代理...")
+    print("正在使用{}个线程并行验证代理...".format(max_threads))
     with tqdm(total=len(proxies)) as pbar:
         def thread_worker():
             while proxies_queue:
@@ -222,6 +223,10 @@ def validate_proxies_threaded(proxies, proxy_type, max_threads=10):
             t.join()
 
     print(f"验证完成：{len(valid_proxies)} 个代理可用")
+    if valid_proxies == 0:
+        sys.exit(0)
+    if valid_proxies<10:
+        print("warning: 可用代理过少")
     return valid_proxies
 
 # 执行请求，检查冲突，并通过代理发送
@@ -321,6 +326,7 @@ def main():
     parser.add_argument('--proxy-type', type=str, default='SOCKS5', choices=['SOCKS4', 'SOCKS5', 'HTTP'], help='Type of proxies to use.')
     parser.add_argument('--proxy-threads', type=int, default=30, help='Number of threads for validating proxies.')
     parser.add_argument('--max-depth', type=int, default=2, help='Maximum depth for crawling links.')
+    parser.add_argument('--recursive-link-search', type='store_true', help='Recursive link search')
 
     args = parser.parse_args()
 
@@ -344,11 +350,12 @@ def main():
     all_urls = {"https://" + args.domain} | {"https://" + sub for sub in subdomains}
 
     # 递归抓取链接
-    print(f"抓取 {args.domain} 的所有链接，深度为 {max_depth}")
-    all_urls.update(get_all_website_links(f"https://{args.domain}"))
+    if args.recursive_link_search:
+        print(f"抓取 {args.domain} 的所有链接，深度为 {max_depth}")
+        all_urls.update(get_all_website_links(f"https://{args.domain}"))
 
-    print(f"Valid URLs found: {len(all_urls)}")
-    urls = list(all_urls)
+        print(f"Valid URLs found: {len(all_urls)}")
+        urls = list(all_urls)
 
     # 处理大文件
     files_in_memory = []
