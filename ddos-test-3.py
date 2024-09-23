@@ -170,7 +170,7 @@ def check_proxy(proxy, proxy_type, timeout=3):
         return False
 
 # 验证代理的线程处理
-def validate_proxies_threaded(proxies, proxy_type, max_threads=10):
+def validate_proxies_threaded(proxies, proxy_type, max_threads=100):
     valid_proxies = []
     lock = threading.Lock()
 
@@ -181,7 +181,7 @@ def validate_proxies_threaded(proxies, proxy_type, max_threads=10):
             with lock:
                 valid_proxies.append(proxy)
 
-    print("正在并行验证代理...")
+    print("正在使用{}个线程并行验证代理...".format(max_threads))
     with tqdm(total=len(proxies)) as pbar:
         def thread_worker():
             while proxies_queue:
@@ -202,6 +202,10 @@ def validate_proxies_threaded(proxies, proxy_type, max_threads=10):
             t.join()
 
     print(f"验证完成：{len(valid_proxies)} 个代理可用")
+    if valid_proxies == 0:
+        sys.exit(0)
+    if valid_proxies<10:
+        print("warning: 可用代理过少")
     return valid_proxies
 
 # 执行请求，检查冲突，并通过代理发送
@@ -299,7 +303,7 @@ def main():
     parser.add_argument('--regenerate-files', action='store_true', help='Regenerate files instead of caching them.')
     parser.add_argument('--proxy-file', type=str, help='Path to proxy list file.')
     parser.add_argument('--proxy-type', type=str, default='SOCKS5', choices=['SOCKS4', 'SOCKS5', 'HTTP'], help='Type of proxies to use.')
-    parser.add_argument('--proxy-threads', type=int, default=10, help='Number of threads for validating proxies.')
+    # parser.add_argument('--proxy-threads', type=int, default=10, help='Number of threads for validating proxies.')
 
     args = parser.parse_args()
 
@@ -334,7 +338,7 @@ def main():
         with open(args.proxy_file, 'r') as f:
             proxies = [line.strip() for line in f.readlines()]
         print(f"Loaded {len(proxies)} proxies from file.")
-        proxies = validate_proxies_threaded(proxies, args.proxy_type, max_threads=args.proxy_threads)
+        proxies = validate_proxies_threaded(proxies, args.proxy_type, max_threads=args.threads)
         print(f"{len(proxies)} proxies validated and usable.")
 
     # 共享资源初始化
