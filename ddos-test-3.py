@@ -3,7 +3,7 @@ import requests
 import socks
 import os
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 import time
 import random
 import threading
@@ -47,17 +47,38 @@ def get_subdomains(domain):
     return subdomains
 
 # 获取所有链接
-def get_all_urls(base_url):
+def get_all_website_links(url, depth=0):
+    if depth > max_depth:
+        return set()
+    print(f"正在访问: {url}，深度：{depth}")
+    domain_name = urlparse(url).netloc
     urls = set()
     try:
-        response = requests.get(base_url, verify=False)
-        soup = BeautifulSoup(response.text, 'html.parser')
-        for link in soup.find_all('a', href=True):
-            href = link['href']
-            full_url = urljoin(base_url, href)
-            urls.add(full_url)
+        headers = random.choice(headers_list)
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()  # 确保请求成功
+        soup = BeautifulSoup(response.text, "html.parser")
+
+        for a_tag in soup.findAll("a"):
+            href = a_tag.attrs.get("href")
+            if href == "" or href is None:
+                continue
+            href = urljoin(url, href)
+            parsed_href = urlparse(href)
+            href = parsed_href.scheme + "://" + parsed_href.netloc + parsed_href.path
+            if domain_name in href and href not in visited_urls:
+                urls.add(href)
+    except requests.exceptions.RequestException as e:
+        logging.error(f"请求错误 {e}")
     except Exception as e:
-        logging.error(f"Error fetching URLs from {base_url}: {e}")
+        logging.error(f"解析错误 {e}")
+
+    visited_urls.update(urls)
+    # 递归访问链接
+    for link in urls:
+        if link not in visited_urls:
+            time.sleep(1)  # 设置延时，避免请求过于频繁
+            get_all_website_links(link, depth + 1)
     return urls
 
 # 生成大文件
@@ -93,8 +114,7 @@ def net_speed():
 # 使用 tqdm 显示测试进度和 Dashboard 信息
 def update_progress(start_time, test_duration):
     global active_threads, requests_last_second, bytes_sent
-    # with tqdm(total=test_duration, bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{rate_fmt}]') as pbar:
-    with tqdm(total=test_duration, desc='Progress') as pbar:
+    with tqdm(total=test_duration, bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{rate_fmt}]') as pbar:
         while threads_running:
             elapsed_time = time.time() - start_time
             progress = elapsed_time / test_duration
@@ -170,7 +190,7 @@ def check_proxy(proxy, proxy_type, timeout=3):
         return False
 
 # 验证代理的线程处理
-def validate_proxies_threaded(proxies, proxy_type, max_threads=100):
+def validate_proxies_threaded(proxies, proxy_type, max_threads=10):
     valid_proxies = []
     lock = threading.Lock()
 
@@ -181,7 +201,7 @@ def validate_proxies_threaded(proxies, proxy_type, max_threads=100):
             with lock:
                 valid_proxies.append(proxy)
 
-    print("正在使用{}个线程并行验证代理...".format(max_threads))
+    print("正在并行验证代理...")
     with tqdm(total=len(proxies)) as pbar:
         def thread_worker():
             while proxies_queue:
@@ -202,10 +222,6 @@ def validate_proxies_threaded(proxies, proxy_type, max_threads=100):
             t.join()
 
     print(f"验证完成：{len(valid_proxies)} 个代理可用")
-    if valid_proxies == 0:
-        sys.exit(0)
-    if valid_proxies<10:
-        print("warning: 可用代理过少")
     return valid_proxies
 
 # 执行请求，检查冲突，并通过代理发送
@@ -303,12 +319,16 @@ def main():
     parser.add_argument('--regenerate-files', action='store_true', help='Regenerate files instead of caching them.')
     parser.add_argument('--proxy-file', type=str, help='Path to proxy list file.')
     parser.add_argument('--proxy-type', type=str, default='SOCKS5', choices=['SOCKS4', 'SOCKS5', 'HTTP'], help='Type of proxies to use.')
-    # parser.add_argument('--proxy-threads', type=int, default=10, help='Number of threads for validating proxies.')
+    parser.add_argument('--proxy-threads', type=int, default=30, help='Number of threads for validating proxies.')
+    parser.add_argument('--max-depth', type=int, default=2, help='Maximum depth for crawling links.')
 
     args = parser.parse_args()
 
     global threads_running, active_threads, requests_last_second, results, bytes_sent
-    global thread_count, test_duration, request_interval, lock
+    global thread_count, test_duration, request_interval, lock, max_depth, headers_list, visited_urls
+
+    max_depth = args.max_depth
+    visited_urls = set()
 
     # 检查域名是否可访问（若未跳过）
     if not args.skip_check:
@@ -322,6 +342,10 @@ def main():
     # 获取子域名和 URL
     subdomains = get_subdomains(args.domain)
     all_urls = {"https://" + args.domain} | {"https://" + sub for sub in subdomains}
+
+    # 递归抓取链接
+    print(f"抓取 {args.domain} 的所有链接，深度为 {max_depth}")
+    all_urls.update(get_all_website_links(f"https://{args.domain}"))
 
     print(f"Valid URLs found: {len(all_urls)}")
     urls = list(all_urls)
@@ -338,7 +362,7 @@ def main():
         with open(args.proxy_file, 'r') as f:
             proxies = [line.strip() for line in f.readlines()]
         print(f"Loaded {len(proxies)} proxies from file.")
-        proxies = validate_proxies_threaded(proxies, args.proxy_type, max_threads=args.threads)
+        proxies = validate_proxies_threaded(proxies, args.proxy_type, max_threads=args.proxy_threads)
         print(f"{len(proxies)} proxies validated and usable.")
 
     # 共享资源初始化

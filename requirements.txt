@@ -1,8 +1,9 @@
+argparse
 requests
+pysocks
 beautifulsoup4
+tqdm
 numpy
 matplotlib
 psutil
-tqdm
 sublist3r
-httpx
