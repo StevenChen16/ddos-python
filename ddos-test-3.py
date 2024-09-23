@@ -311,6 +311,27 @@ def perform_requests(urls, headers_list, request_interval, methods, garbled_text
 
 # 主程序逻辑
 def main():
+
+    print('''
+    ____        ____  ____       _____
+   / __ \__  __/ __ \/ __ \____ / ___/
+  / /_/ / / / / / / / / / / __ \\__ \ 
+ / ____/ /_/ / /_/ / /_/ / /_/ /__/ / 
+/_/    \__, /_____/_____/\____/____/  
+      /____/                          
+>--------------------------------------------->
+Version 3.7.1 (2024/9/22)
+                              C0ded by Steven Chen
+┌─────────────────────────────────────────────┐
+│        Tos: Don't attack .gov website       │
+├─────────────────────────────────────────────┤
+│                 New stuff:                  │
+│          [+] Added Java Version             │
+├─────────────────────────────────────────────┤
+│ Link: https://github.com/StevenChen16/PyDDoS│
+└─────────────────────────────────────────────┘
+    ''')
+
     parser = argparse.ArgumentParser(description='Website Stress Testing Tool')
     parser.add_argument('--domain', type=str, required=True, help='The domain to test.')
     parser.add_argument('--duration', type=int, default=2400, help='Test duration in seconds.')
