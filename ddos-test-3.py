@@ -211,10 +211,15 @@ def main():
     global thread_count, test_duration, request_interval, lock
 
     # 检查域名是否可访问（若未跳过）
+    domain_accessible = False
     if not args.skip_check:
         domain_accessible = check_domain_accessibility(args.domain, args.tolerance)
-        if not domain_accessible:
-            print(f"Warning: 域名 {args.domain} 访问失败，将继续进行压力测试。")
+        if domain_accessible:
+            print(f"域名 {args.domain} 检查成功，可以访问。")
+        else:
+            print(f"域名 {args.domain} 检查失败，无法访问。")
+    else:
+        print(f"跳过域名检查。")
 
     # 加载 User-Agent 列表
     headers_list = [{"User-Agent": ua} for ua in load_user_agents(args.ua_file)]
