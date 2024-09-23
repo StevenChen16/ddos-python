@@ -1,0 +1,8 @@
+requests
+beautifulsoup4
+numpy
+matplotlib
+psutil
+tqdm
+sublist3r
+httpx
