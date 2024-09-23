@@ -129,7 +129,9 @@ def update_progress(start_time, test_duration):
             })
             pbar.update(0)
             time.sleep(1)
-            requests_last_second = 0  # Reset after each second
+
+            with lock:
+                requests_last_second = 0  # Reset after each second
 
 # 检查域名是否可访问
 def check_domain_accessibility(domain, max_retries):
