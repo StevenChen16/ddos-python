@@ -102,21 +102,23 @@ def update_progress(start_time, test_duration):
             requests_last_second = 0  # Reset after each second
 
 # 检查域名是否可访问
-def check_domain_accessibility(domain):
-    max_retries = 5
+def check_domain_accessibility(domain, max_retries):
+    success = False
     for attempt in range(max_retries):
         try:
             response = requests.get(f"https://{domain}", timeout=5)
             if response.status_code == 200:
                 print(f"域名 {domain} 可访问")
-                return True
+                success = True
+                break
         except requests.exceptions.ConnectionError as e:
             print(f"尝试访问域名 {domain} 失败: {e}")
-            if attempt == max_retries - 1:
+            if attempt < max_retries - 1:
+                print(f"重试中... ({attempt + 1}/{max_retries})")
+            else:
                 print(f"最大重试次数已到达，域名 {domain} 不可访问")
-                return False
         time.sleep(1)
-    return False
+    return success
 
 # 执行请求
 def perform_requests(urls, headers_list, request_interval):
@@ -200,14 +202,19 @@ def main():
     parser.add_argument('--threads', type=int, default=1000, help='Number of threads.')
     parser.add_argument('--interval', type=float, default=0.1, help='Request interval in seconds.')
     parser.add_argument('--ua-file', type=str, default='user_agents.txt', help='Path to User-Agent list file.')
+    parser.add_argument('--tolerance', type=int, default=5, help='Maximum retries for domain check.')
+    parser.add_argument('--skip-check', action='store_true', help='Skip domain accessibility check.')
+
     args = parser.parse_args()
 
     global threads_running, active_threads, requests_last_second, results
     global thread_count, test_duration, request_interval, lock
 
-    # 检查域名是否可访问
-    if not check_domain_accessibility(args.domain):
-        sys.exit(1)
+    # 检查域名是否可访问（若未跳过）
+    if not args.skip_check:
+        domain_accessible = check_domain_accessibility(args.domain, args.tolerance)
+        if not domain_accessible:
+            print(f"Warning: 域名 {args.domain} 访问失败，将继续进行压力测试。")
 
     # 加载 User-Agent 列表
     headers_list = [{"User-Agent": ua} for ua in load_user_agents(args.ua_file)]
