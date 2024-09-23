@@ -356,6 +356,8 @@ def main():
 
         print(f"Valid URLs found: {len(all_urls)}")
         urls = list(all_urls)
+    else:
+        urls = [f"https://{args.domain}"]
 
     # 处理大文件
     files_in_memory = []
