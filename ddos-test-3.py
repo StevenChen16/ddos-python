@@ -223,9 +223,9 @@ def validate_proxies_threaded(proxies, proxy_type, max_threads=10):
             t.join()
 
     print(f"验证完成：{len(valid_proxies)} 个代理可用")
-    if valid_proxies == 0:
+    if len(valid_proxies) == 0:
         sys.exit(0)
-    if valid_proxies<10:
+    if len(valid_proxies) < 10:
         print("warning: 可用代理过少")
     return valid_proxies
 
