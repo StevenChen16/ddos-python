@@ -89,9 +89,9 @@ def generate_large_binary_file(file_name, size_in_mb):
 # 动态管理线程数
 def dynamic_thread_management():
     cpu_usage = psutil.cpu_percent(interval=1)
-    if cpu_usage > 80:
+    if (cpu_usage > 80):
         return max(10, thread_count // 2)
-    elif cpu_usage < 50:
+    elif (cpu_usage < 50):
         return min(2500, thread_count * 2)
     return thread_count
 
@@ -139,13 +139,13 @@ def check_domain_accessibility(domain, max_retries):
     for attempt in range(max_retries):
         try:
             response = requests.get(f"https://{domain}", timeout=5)
-            if response.status_code == 200:
+            if (response.status_code == 200):
                 print(f"域名 {domain} 可访问")
                 success = True
                 break
         except requests.exceptions.ConnectionError as e:
             print(f"尝试访问域名 {domain} 失败: {e}")
-            if attempt < max_retries - 1:
+            if (attempt < max_retries - 1):
                 print(f"重试中... ({attempt + 1}/{max_retries})")
             else:
                 print(f"最大重试次数已到达，域名 {domain} 不可访问")
@@ -181,11 +181,11 @@ def check_proxy(proxy, proxy_type, timeout=3):
     try:
         s = socks.socksocket()
         s.settimeout(timeout)
-        if proxy_type == 'SOCKS4':
+        if (proxy_type == 'SOCKS4'):
             s.set_proxy(socks.SOCKS4, proxy[0], int(proxy[1]))
-        elif proxy_type == 'SOCKS5':
+        elif (proxy_type == 'SOCKS5'):
             s.set_proxy(socks.SOCKS5, proxy[0], int(proxy[1]))
-        elif proxy_type == 'HTTP':
+        elif (proxy_type == 'HTTP'):
             s.set_proxy(socks.HTTP, proxy[0], int(proxy[1]))
         s.connect(('1.1.1.1', 80))  # 测试代理的可用性
         return True
@@ -225,9 +225,9 @@ def validate_proxies_threaded(proxies, proxy_type, max_threads=10):
             t.join()
 
     print(f"验证完成：{len(valid_proxies)} 个代理可用")
-    if len(valid_proxies) == 0:
+    if (len(valid_proxies) == 0):
         sys.exit(0)
-    if len(valid_proxies) < 10:
+    if (len(valid_proxies) < 10):
         print("warning: 可用代理过少")
     return valid_proxies
 
@@ -246,7 +246,7 @@ def perform_requests(urls, headers_list, request_interval, methods, garbled_text
             method = random.choice(methods)
             
             # 检查冲突：GET 不支持大文件上传
-            if method == 'GET' and files_in_memory:
+            if (method == 'GET' and files_in_memory):
                 logging.error(f"GET 请求不支持大文件上传，跳过该请求: {url}")
                 continue
 
@@ -261,24 +261,24 @@ def perform_requests(urls, headers_list, request_interval, methods, garbled_text
             proxy = random.choice(proxies) if proxies else None
             if proxy:
                 s = socks.socksocket()
-                if proxy_type == 'SOCKS4':
+                if (proxy_type == 'SOCKS4'):
                     s.set_proxy(socks.SOCKS4, proxy[0], int(proxy[1]))
-                elif proxy_type == 'SOCKS5':
+                elif (proxy_type == 'SOCKS5'):
                     s.set_proxy(socks.SOCKS5, proxy[0], int(proxy[1]))
-                elif proxy_type == 'HTTP':
+                elif (proxy_type == 'HTTP'):
                     s.set_proxy(socks.HTTP, proxy[0], int(proxy[1]))
                 s.connect((url, 80))
 
             # 发送请求
             try:
-                if method == 'GET':
+                if (method == 'GET'):
                     response = requests.get(url, headers=headers, proxies=proxy, verify=False)
-                elif method == 'POST':
+                elif (method == 'POST'):
                     if files_in_memory:
                         response = requests.post(url, headers=headers, files={'file': data}, verify=False)
                     else:
                         response = requests.post(url, headers=headers, data=data, verify=False)
-                elif method == 'DELETE':
+                elif (method == 'DELETE'):
                     response = requests.delete(url, headers=headers, data=data, verify=False)
             except requests.exceptions.RequestException as e:
                 logging.error(f"请求错误: {e}")
@@ -308,6 +308,54 @@ def perform_requests(urls, headers_list, request_interval, methods, garbled_text
     finally:
         with lock:
             active_threads -= 1
+
+def analyze_results():
+    url_stats = {url: {"times_requested": 0, "response_times": [], "data_sizes": [], "failures": 0} for url in urls}
+    for result in results:
+        stats = url_stats[result["url"]]
+        stats["times_requested"] += 1
+        stats["response_times"].append(result["response_time"])
+        stats["data_sizes"].append(result["data_size"])
+        if not result["success"]:
+            stats["failures"] += 1
+
+    print("\nDetailed URL Statistics:")
+    for url, stats in url_stats.items():
+        avg_response_time = np.mean(stats["response_times"]) if stats["response_times"] else 0
+        avg_data_size = np.mean(stats["data_sizes"]) if stats["data_sizes"] else 0
+        if stats['times_requested'] != 0:
+            print(f"URL: {url}, Requests: {stats['times_requested']}, Avg Response Time: {avg_response_time:.2f}s, "
+                  f"Avg Data Size: {avg_data_size:.2f} bytes, Failures: {stats['failures']}, Failures Rate: {(stats['failures']/stats['times_requested'])*100:.2f}%")
+        else:
+            print(f"URL: {url}, Requests: {stats['times_requested']}, Avg Response Time: {avg_response_time:.2f}s, "
+                  f"Avg Data Size: {avg_data_size:.2f} bytes, Failures: {stats['failures']}, Failures Rate: /%")
+
+    url_count = len(urls)
+    plt.figure(figsize=(min(max(url_count, 10), 50), 8), dpi=800)
+
+    plt.subplot(1, 3, 1)
+    plt.bar(range(url_count), [stats['failures'] for stats in url_stats.values()], tick_label=list(url_stats.keys()))
+    plt.xticks(rotation=45, ha="right", fontsize=8)
+    plt.ylabel('Failures')
+    plt.title('Failures by URL')
+
+    plt.subplot(1, 3, 2)
+    plt.bar(range(url_count), [np.mean(stats['data_sizes']) for stats in url_stats.values()], tick_label=list(url_stats.keys()))
+    plt.xticks(rotation=45, ha="right", fontsize=8)
+    plt.ylabel('Average Data Size (bytes)')
+    plt.title('Average Data Size by URL')
+
+    plt.subplot(1, 3, 3)
+    plt.bar(range(url_count), [np.mean(stats['response_times']) for stats in url_stats.values()], tick_label=list(url_stats.keys()))
+    plt.xticks(rotation=45, ha="right", fontsize=8)
+    plt.ylabel('Average Response Time (s)')
+    plt.title('Average Response Time by URL')
+
+    now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    plt.savefig(f"{now}.jpg")
+    
+    plt.tight_layout()
+    plt.show()
 
 # 主程序逻辑
 def main():
@@ -427,7 +475,7 @@ Version 3.7.1 (2024/9/22)
         t.join()
 
     # 分析并可视化结果
-    analyze_results(urls)
+    analyze_results()
 
     # 停止进度条线程
     progress_thread.join()
